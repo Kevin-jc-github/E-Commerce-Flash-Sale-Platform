@@ -3,8 +3,10 @@ package com.jiuzhang.seckill.service;
 import com.alibaba.fastjson.JSON;
 import com.jiuzhang.seckill.db.dao.OrderDao;
 import com.jiuzhang.seckill.db.dao.SeckillActivityDao;
+import com.jiuzhang.seckill.db.dao.SeckillCommodityDao;
 import com.jiuzhang.seckill.db.po.Order;
 import com.jiuzhang.seckill.db.po.SeckillActivity;
+import com.jiuzhang.seckill.db.po.SeckillCommodity;
 import com.jiuzhang.seckill.mq.RocketMQService;
 import com.jiuzhang.seckill.util.RedisService;
 import com.jiuzhang.seckill.util.SnowFlake;
@@ -19,13 +21,16 @@ import java.util.Date;
 public class SeckillActivityService {
 
     @Resource
-    private RedisService service;
-
-    @Resource
     private SeckillActivityDao seckillActivityDao;
 
     @Resource
     OrderDao orderDao;
+
+    @Resource
+    private SeckillCommodityDao seckillCommodityDao;
+
+    @Resource
+    private RedisService redisService;
 
     private SnowFlake snowFlake = new SnowFlake(1,1);
 
@@ -34,7 +39,7 @@ public class SeckillActivityService {
 
     public boolean seckillStockValidator(long activityId){
         String key = "stock:" + activityId;
-        return service.stockDeductValidation(key);
+        return redisService.stockDeductValidator(key);
     }
 
     public Order createOrder(long seckillActivityId, long userId) throws Exception {
@@ -54,6 +59,18 @@ public class SeckillActivityService {
          */
         rocketMQService.sendDelayMessage("pay_check", JSON.toJSONString(order), 3);
         return order;
+    }
+
+    /**
+     * 将秒杀详情相关信息倒入redis
+     * @param seckillActivityId
+     */
+    public void pushSeckillInfoToRedis(long seckillActivityId) {
+        SeckillActivity seckillActivity = seckillActivityDao.querySeckillActivityById(seckillActivityId);
+        redisService.setValue("seckillActivity:" + seckillActivityId, JSON.toJSONString(seckillActivity));
+
+        SeckillCommodity seckillCommodity = seckillCommodityDao.querySeckillCommodityById(seckillActivity.getCommodityId());
+        redisService.setValue("seckillCommodity:" + seckillActivity.getCommodityId(), JSON.toJSONString(seckillCommodity));
     }
 
     /**
@@ -78,7 +95,7 @@ public class SeckillActivityService {
          * 2.订单支付完成
          */
         order.setPayTime(new Date());
-//订单状态 0:没有可用库存，无效订单 1:已创建等待付款 ,2:支付完成
+        //订单状态 0:没有可用库存，无效订单 1:已创建等待付款 ,2:支付完成
         order.setOrderStatus(2);
         orderDao.updateOrder(order);
         /*
